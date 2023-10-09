@@ -1,0 +1,117 @@
+---
+title: "Single Cell Genomics Dashboard"
+author: "me"
+date: "2023-10-07"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(dplyr)
+library(Seurat)
+library(patchwork)
+```
+
+## Load the PMBC dataset
+```{r}
+pbmc.data <- Read10X(data.dir = "/Users/kajeethasarvananthan/Desktop/hg19")
+# Initialize the Seurat object with the raw (non-normalized data).
+pbmc <- CreateSeuratObject(counts = pbmc.data, project = "pbmc3k", min.cells = 3, min.features = 200)
+pbmc
+```
+
+#explore the data cell name, barcode and number of counts or features  
+
+```{r}
+pbmc@meta.data
+```
+
+#find the number of mitochondrial genes (each cell will show the percentage of mitochondrial genes in it) - indicator of metabolic stress or cells dying: 
+#anything under 20% is usually good to keep
+
+```{r cars}
+pbmc[["percent.mt"]] <- PercentageFeatureSet(pbmc, pattern = "^MT-")
+head(pbmc@meta.data)
+```
+
+## Normalize the data with 13714 genes
+
+
+```{r pressure, echo=FALSE}
+pbmc <- NormalizeData(pbmc, normalization.method = "LogNormalize", scale.factor = 10000)
+pbmc <- NormalizeData(pbmc)
+```
+
+#identify highly variable features by finding the most variable genes
+```{r}
+pbmc <- FindVariableFeatures(pbmc, selection.method = "vst", nfeatures = 2000)
+
+# Identify the 10 most highly variable genes
+top10 <- head(VariableFeatures(pbmc), 10)
+
+```
+#Scaling the data so that the mean expression across all cells is 0 and the variance across cells is 1
+```{r}
+all.genes <- rownames(pbmc)
+pbmc <- ScaleData(pbmc, features = all.genes)
+```
+
+#Running PCA on the 2000 variable genes. Each PCA will list genes that are responsible for the variation in that component. 
+```{r}
+ pbmc <- RunPCA(pbmc, features = VariableFeatures(object = pbmc))
+```
+#Running Non-linear dimensional reduction (UMAP/tSNE)
+```{r}
+pbmc <- RunUMAP(pbmc, dims = 1:10)
+```
+#Clustering the cells (machine learning algorithms to find clustering) and visualizing the clusters. 
+```{r}
+pbmc <- FindNeighbors(pbmc, dims = 1:10)
+pbmc <- FindClusters(pbmc, resolution = 0.5)
+DimPlot(pbmc, reduction = "umap")
+```
+#Running differential marker expression analysis to find labels for the cell types. This function will speed up the process by setting cell number. 
+```{r}
+#this finds all the markers of cluster 2
+cluster2.markers <- FindMarkers(pbmc, ident.1 = 2, min.pct = 0.25)
+head(cluster2.markers, n = 5)
+
+# this find alls markers distinguishing cluster 5 from clusters 0 and 3
+cluster5.markers <- FindMarkers(pbmc, ident.1 = 5, ident.2 = c(0, 3), min.pct = 0.25)
+head(cluster5.markers, n = 5)
+
+#this find markers for every cluster compared to all remaining cells, and choses only the positive ones
+
+pbmc.markers <- FindAllMarkers(pbmc, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+pbmc.markers %>%
+    group_by(cluster) %>%
+    slice_max(n = 2, order_by = avg_log2FC)
+```
+#Now we will assign cell type based on some of the markers we identified for the clusters in the above analysis: 
+```{r}
+new.cluster.ids <- c("Naive CD4 T", "CD14+ Mono", "Memory CD4 T", "B", "CD8 T", "FCGR3A+ Mono",
+    "NK", "DC", "Platelet")
+names(new.cluster.ids) <- levels(pbmc)
+pbmc <- RenameIdents(pbmc, new.cluster.ids)
+```
+#lets add the labels to the object
+```{r}
+pbmc$cell_type <- Idents(pbmc)
+```
+
+#To show the bandwidth of the visualization ability in the app lets randomly assign the cells age, sex and sampleID
+```{r}
+set.seed(1)
+sex <- sample(c("male", "female"), ncol(pbmc), replace=TRUE)
+pbmc$sex <- sex
+age <- sample(18:65, ncol(pbmc), replace= TRUE)
+pbmc$age <- age
+sampleID <- paste0("sample", sample(1:10, ncol(pbmc), replace = TRUE))
+pbmc$sampleID <- sampleID
+
+```
+
+
+#now lets save the object
+```{r}
+saveRDS(pbmc, file = "/Users/kajeethasarvananthan/Desktop/hg19/final.rds")
+```
